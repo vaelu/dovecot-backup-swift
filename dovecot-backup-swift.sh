@@ -608,7 +608,7 @@ if [ "$VAR_COUNT_SUCCESS" -gt "0" ]; then
 	for str in ${VAR_SUCCESSFUL_USER[@]}; do
 		SUCCESSFUL_USERS+=$(echo $str "\n")
 	done
-	sendwebhook "Email backup successful for ${VAR_COUNT_SUCCESS} mailbox(es)" 3066993 "Backup successfully created for the following mailboxes:\n\n${SUCCESSFUL_USERS[*]}"
+	sendwebhook "Email backup successful for ${VAR_COUNT_SUCCESS} mailbox(es)" 3066993 "${SUCCESSFUL_USERS[*]}"
 	# If no errors occurred on user backups, exit with return code 0.
 	if [ "$VAR_COUNT_FAIL" -eq "0" ]; then
 		exit 0
@@ -620,7 +620,7 @@ if [ "$VAR_COUNT_FAIL" -gt "0" ]; then
 	for str in ${VAR_FAILED_USER[@]}; do
 		FAILED_USERS+=$(echo $str "\n")
 	done
-	sendwebhook "Email backup failed for ${VAR_COUNT_FAIL} mailbox(es)" 15158332 "Backup failed for the following mailboxes:\n\n${FAILED_USERS[*]}"
+	sendwebhook "Email backup failed for ${VAR_COUNT_FAIL} mailbox(es)" 15158332 "${FAILED_USERS[*]}"
 	# If errors occurred on user backups, exit with return code 1.
 	exit 1
 fi
