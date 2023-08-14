@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 
 ##############################################################################
-# Script-Name : dovecot_backup.sh                                            #
-# Description : Script to backup the mailboxes from dovecot.                 #
-#               On successful execution only a LOG file will be written.     #
-#               On error while execution, a LOG file and a error message     #
-#               will be send by e-mail.                                      #
+# Script-Name : dovecot-backup-swift.sh                                      #
+# Description : Script to backup the mailboxes from dovecot and upload       #
+#               them to OpenStack Swift Object Storage.                      #
+#               The status of the backup process is sent to a                #
+#               discord webhook.                                             #
 #                                                                            #
-# Last update : 03.07.2023                                                   #
-# Version     : 1.20                                                         #
 #                                                                            #
 # Author      : Klaus Tachtler, <klaus@tachtler.net>                         #
+# Author      : Valentin Spinnler, <mail@valentin.zip>                       #
 # DokuWiki    : http://www.dokuwiki.tachtler.net                             #
 # Homepage    : http://www.tachtler.net                                      #
 #                                                                            #
@@ -25,157 +24,19 @@
 #                                                                            #
 ##############################################################################
 
-##############################################################################
-#                                H I S T O R Y                               #
-##############################################################################
-# Version     : 1.01                                                         #
-# Description : Bugfix: Delete all temporary domain directories not only the #
-#               last one. Thanks to Guenther J. Niederwimmer.                #
-# -------------------------------------------------------------------------- #
-# Version     : 1.02                                                         #
-# Description : GitHub: Issue #1                                             #
-#               The name of the variable to delete the number of old backup  #
-#               files $DAYS_DELETE was renamed to $BACKUPFILES_DELETE. This  #
-#               was done for better understanding, because if the script was #
-#               running more than once a day, this could be misunderstood.   #
-#               Thanks to Diane Trout.                                       #
-# -------------------------------------------------------------------------- #
-# Version     : 1.03                                                         #
-# Description : Quota calculation double the calculated size of a mailbox,   #
-#               when dict was used. See also following mailing-list entry:   #
-#                                                                            #
-#               https://www.dovecot.org/list/dovecot/2012-February/          #
-#               063585.html                                                  #
-#                                                                            #
-#               Thanks to André Peters.                                      #
-# -------------------------------------------------------------------------- #
-# Version     : 1.04                                                         #
-# Description : Typo: Correction of the return code query of                 #
-#               "# Delete LOCK file." in a pure string comparison.           #
-#               Thanks to Oli Sennhauser.                                    #
-# -------------------------------------------------------------------------- #
-# Version     : 1.05                                                         #
-# Description : GitHub: Issue #4                                             #
-#               Add error handling for dsync command.                        #
-#               Add runtime statistics.                                      #
-#               Thanks to HenrikWMG.                                         #
-# -------------------------------------------------------------------------- #
-# Version     : 1.06                                                         #
-# Description : Avoid an error when trying to delete backup files, if the    #
-#               $BACKUPFILES_DELETE count is NOT reached.                    #
-#               Change file owner, after backup was created.                 #
-#               Change file permissions to 600, after backup was created.    #
-#               Thanks to Seep1959.                                          #
-# -------------------------------------------------------------------------- #
-# Version     : 1.07                                                         #
-# Description : Compatibility: Change the parameter order for the step       #
-#               "Delete archive files for user" for better compatibility     #
-#               with FreeBSD.                                                #
-#               Thanks to Alexander Preyer.                                  #
-# -------------------------------------------------------------------------- #
-# Version     : 1.08                                                         #
-# Description : GitHub Issue #9                                              #
-#               Add ability to only backup specific mailboxes, by using the  # 
-#               variable FILE_USERLIST with the file path and file name as   #
-#               content. The file must contain one e-mail address per line.  #
-#               Add the calculation of the script runtime.                   #
-#               Thanks to graue Ritter.                                      #
-# -------------------------------------------------------------------------- #
-# Version     : 1.09                                                         #
-# Description : Add a switch to enable or disable e-mail address check, when #
-#               FILE_USERLIST was set and used.                              #
-#               Thanks to kbridger.                                          #
-# -------------------------------------------------------------------------- #
-# Version     : 1.10                                                         #
-# Description : Code redesign.                                               #
-# -------------------------------------------------------------------------- #
-# Version     : 1.11                                                         #
-# Description : GitHub Issue #12                                             #
-#               Change of the temporary storage medium from DIR_BACKUP to    #
-#               TMP_FOLDER for temporary storage of extracted emails from    #
-#               the mailboxes was introduced. This allows the use of a       #
-#               temporary storage of the extracted emails from the mailboxes #
-#               on a faster storage medium, or also on a local storage       #
-#               medium, which avoids rights problems if DIR_BACKUP is e.g.   #
-#               an NFS mounted storage.                                      #
-#               Thanks to Krisztián Hamar.                                   #
-# -------------------------------------------------------------------------- #
-# Version     : 1.12                                                         #
-# Description : GitHub: Issue #13                                            #
-#               Change in mv command detection due to initial problems with  #
-#               Ubuntu 18.04 LTS.                                            #
-#               Thanks to hatted.                                            #
-# -------------------------------------------------------------------------- #
-# Version     : 1.13                                                         #
-# Description : GitHub: Issue #16                                            #
-#               Changed the timezone format to hours: for example (+0100) at #
-#               VAR_EMAILDATE, because not all e-Mail user interfaces can    #
-#               handle the letter time zone notation.                        #
-#               Thanks to velzebop.                                          #
-# -------------------------------------------------------------------------- #
-# Version     : 1.14                                                         #
-# Description : GitHub: Issue #18                                            #
-#               Add dash '-' and dot '.' to the list of valid chars for the  #
-#               e-Mail address validation for the localpart and the          #
-#               domainpart.                                                  #
-#               Thanks to Henrocker.                                         #
-# -------------------------------------------------------------------------- #
-# Version     : 1.15                                                         #
-# Description : GitHub: Issue #21                                            #
-#               Set the required ownership on TMP_FOLDER before running the  #
-#               script.                                                      #
-#               Thanks to LarsBel.                                           #
-# -------------------------------------------------------------------------- #
-# Version     : 1.16                                                         #
-# Description : Optimize ownership settings for TMP_FOLDER and DIR_BACKUP.   #
-# -------------------------------------------------------------------------- #
-# Version     : 1.17                                                         #
-# Description : GitHub: Issue #22.                                           #
-#               Bugfix - movelog does not work properly when an email is to  #
-#               be sent due to an error, or a status email has been          #
-#               requested.                                                   #
-#               Thanks to selbitschka.                                       #
-# -------------------------------------------------------------------------- #
-# Version     : 1.18                                                         #
-# Description : Introduction of zstd compression as an alternative choice to #
-#               gzip compression. So now by setting the variable COMPRESSION #
-#               the type of compression can be selected between zst and gz.  #
-#               The zstd compression can lower the execution time by half.   #
-#               The design of the code was also revised.                     #
-#               The error handling was also been improved.                   #
-#               Thanks to Marco De Lellis.                                   #
-# -------------------------------------------------------------------------- #
-# Version     : 1.19                                                         #
-# Description : GitHub: Issue #24                                            #
-#               Correct the license mismatch between GitHub and the script.  #
-#               Thanks to David Haerdeman (Alphix).                          #
-# -------------------------------------------------------------------------- #
-# Version     : 1.20                                                         #
-# Description : GitHub: Pull request #26                                     #
-#               Improved FreeBSD compatibility.                              #
-#               Thanks to wombelix (Dominik Wombacher)                       #
-# -------------------------------------------------------------------------- #
-# Version     : x.xx                                                         #
-# Description : <Description>                                                #
-# -------------------------------------------------------------------------- #
-##############################################################################
-
-##############################################################################
-# >>> Please edit following lines for personal settings and custom usages. ! #
-##############################################################################
 
 # CUSTOM - Script-Name.
-SCRIPT_NAME='dovecot_backup'
+SCRIPT_NAME='dovecot-backup-swift'
 
 # CUSTOM - Backup-Files compression method - (possible values: gz zst).
 COMPRESSION='gz'
 
 # CUSTOM - Backup-Files.
-TMP_FOLDER='/srv/backup'
-DIR_BACKUP='/srv/backup'
+TMP_FOLDER='/tmp/dovecot-backup-swift'
+DIR_BACKUP='/tmp/dovecot-backup-swift'
 FILE_BACKUP=dovecot_backup_`date '+%Y%m%d_%H%M%S'`.tar.$COMPRESSION
 FILE_DELETE=$(printf '*.tar.%s' $COMPRESSION)
-BACKUPFILES_DELETE=14
+BACKUPFILES_DELETE=2
 
 # CUSTOM - dovecot Folders.
 MAILDIR_TYPE='maildir'
@@ -187,18 +48,16 @@ MAILDIR_GROUP='vmail'
 #          SET. If NOT, the script will determine all mailboxes by default.
 # FILE_USERLIST='/path/and/file/name/of/user/list/with/one/user/per/line'
 # - OR -
-# FILE_USERLIST=''
 FILE_USERLIST=''
 
 # CUSTOM - Check when FILE_USERLIST was used, if the user per line was a
 #          valid e-mail address [Y|N].
 FILE_USERLIST_VALIDATE_EMAIL='N'
 
-# CUSTOM - Mail-Recipient.
-MAIL_RECIPIENT='you@example.com'
-
-# CUSTOM - Status-Mail [Y|N].
-MAIL_STATUS='N'
+# CUSTOM - Swift container name. It will autocreate it if the container does not exist.
+SWIFT_CONTAINER_NAME=""
+# CUSTOM - Discord webhook url where the status notification is sent.
+DISCORD_WEBHOOK_URL=""
 
 ##############################################################################
 # >>> Normaly there is no need to change anything below this comment line. ! #
@@ -210,7 +69,6 @@ GZIP_COMMAND=`command -v gzip`
 ZSTD_COMMAND=`command -v zstd`
 TOUCH_COMMAND=`command -v touch`
 RM_COMMAND=`command -v rm`
-PROG_SENDMAIL=`command -v sendmail`
 CAT_COMMAND=`command -v cat`
 DATE_COMMAND=`command -v date`
 MKDIR_COMMAND=`command -v mkdir`
@@ -220,6 +78,8 @@ MKTEMP_COMMAND=`command -v mktemp`
 GREP_COMMAND=`command -v grep`
 MV_COMMAND=`command which mv`
 STAT_COMMAND=`command -v stat`
+CURL_COMMAND=`command -v curl`
+SWIFT_COMMAND=`command -v swift`
 FILE_LOCK='/tmp/'$SCRIPT_NAME'.lock'
 FILE_LOG='/var/log/'$SCRIPT_NAME'.log'
 FILE_LAST_LOG='/tmp/'$SCRIPT_NAME'.log'
@@ -230,7 +90,9 @@ VAR_SENDER='root@'$VAR_HOSTNAME
 VAR_EMAILDATE=`$DATE_COMMAND '+%a, %d %b %Y %H:%M:%S (%z)'`
 declare -a VAR_LISTED_USER=()
 declare -a VAR_FAILED_USER=()
+declare -a VAR_SUCCESSFUL_USER=()
 VAR_COUNT_USER=0
+VAR_COUNT_SUCCESS=0
 VAR_COUNT_FAIL=0
 
 # FreeBSD specific commands
@@ -270,37 +132,15 @@ function movelog() {
 	$RM_COMMAND -f $FILE_LOCK
 }
 
-function sendmail() {
-        case "$1" in
-        'STATUS')
-                MAIL_SUBJECT='Status execution '$SCRIPT_NAME' script.'
-        ;;
-        *)
-                MAIL_SUBJECT='ERROR while execution '$SCRIPT_NAME' script !!!'
-        ;;
-        esac
-
-$CAT_COMMAND <<MAIL >$FILE_MAIL
-Subject: $MAIL_SUBJECT
-Date: $VAR_EMAILDATE
-From: $VAR_SENDER
-To: $MAIL_RECIPIENT
-
-MAIL
-
-$CAT_COMMAND $FILE_LAST_LOG >> $FILE_MAIL
-
-$PROG_SENDMAIL -f $VAR_SENDER -t $MAIL_RECIPIENT < $FILE_MAIL
-
-$RM_COMMAND -f $FILE_MAIL
-
+function sendwebhook() {
+  $CURL_COMMAND -H "Content-Type: application/json" \
+  -d '{"content":null,"embeds":[{"title":"'"$1"'","description":"'"$3"'","color":'$2'}]}' $DISCORD_WEBHOOK_URL
 }
 
 function error () {
 	# Parameters.
 	CODE_ERROR="$1"
 
-        sendmail ERROR
 	movelog
 	exit $CODE_ERROR
 }
@@ -378,9 +218,6 @@ log ""
 log "TMP_FOLDER..................: $TMP_FOLDER"
 log "DIR_BACKUP..................: $DIR_BACKUP"
 log ""
-log "MAIL_RECIPIENT..............: $MAIL_RECIPIENT"
-log "MAIL_STATUS.................: $MAIL_STATUS"
-log ""
 log "FILE_USERLIST...............: $FILE_USERLIST"
 log "FILE_USERLIST_VALIDATE_EMAIL: $FILE_USERLIST_VALIDATE_EMAIL"
 log ""
@@ -408,7 +245,8 @@ checkcommand $GREP_COMMAND
 checkcommand $MKTEMP_COMMAND
 checkcommand $MV_COMMAND
 checkcommand $STAT_COMMAND
-checkcommand $PROG_SENDMAIL
+checkcommand $CURL_COMMAND
+checkcommand $SWIFT_COMMAND
 
 if [ $COMPRESSION = 'gz' ]; then
         checkcommand $GZIP_COMMAND
@@ -661,6 +499,18 @@ for users in "${VAR_LISTED_USER[@]}"; do
 
 		cd $DIR_BACKUP
 
+		log "Uploading archive files to Swift Object Storage for user: $users ..."
+		$SWIFT_COMMAND upload --object-name "$users-$FILE_BACKUP" $SWIFT_CONTAINER_NAME "$DIR_BACKUP/$users-$FILE_BACKUP"
+		if [ "$?" != "0" ]; then
+        		logline "Uploading archive files to Swift Object Storage: $DIR_BACKUP " false
+						((VAR_COUNT_FAIL++))
+						VAR_FAILED_USER+=($users);
+		else
+        		logline "Uploading archive files to Swift Object Storage: $DIR_BACKUP " true
+						((VAR_COUNT_SUCCESS++))
+						VAR_SUCCESSFUL_USER+=($users);
+		fi
+
 		log "Delete archive files for user: $users ..."
 		(ls -t $users-$FILE_DELETE|head -n $BACKUPFILES_DELETE;ls $users-$FILE_DELETE)|sort|uniq -u|xargs -r rm
 		if [ "$?" != "0" ]; then
@@ -749,18 +599,28 @@ log ""
 headerblock "Finished creating the backups [`$DATE_COMMAND '+%a, %d %b %Y %H:%M:%S (%z)'`]"
 log ""
 
-# If errors occurred on user backups, exit with return code 1 instead of 0.
-if [ "$VAR_COUNT_FAIL" -gt "0" ]; then
-        sendmail ERROR
-	# Move the log to the permanent log file.
-	movelog
-	exit 1
-else
-	# Status e-mail.
-	if [ $MAIL_STATUS = 'Y' ]; then
-        	sendmail STATUS
+# Move the log to the permanent log file.
+movelog
+
+if [ "$VAR_COUNT_SUCCESS" -gt "0" ]; then
+	# Send success webhook.
+	declare -a SUCCESSFUL_USERS=()
+	for str in ${VAR_SUCCESSFUL_USER[@]}; do
+		SUCCESSFUL_USERS+=$(echo $str "\n")
+	done
+	sendwebhook "Email backup successful for ${VAR_COUNT_SUCCESS} mailbox(es)" 3066993 "Backup successfully created for the following mailboxes:\n\n${SUCCESSFUL_USERS[*]}"
+	# If no errors occurred on user backups, exit with return code 0.
+	if [ "$VAR_COUNT_FAIL" -eq "0" ]; then
+		exit 0
 	fi
-	# Move the log to the permanent log file.
-	movelog
-	exit 0
+fi
+if [ "$VAR_COUNT_FAIL" -gt "0" ]; then
+	# Send error webhook.
+	declare -a FAILED_USERS=()
+	for str in ${VAR_FAILED_USER[@]}; do
+		FAILED_USERS+=$(echo $str "\n")
+	done
+	sendwebhook "Email backup failed for ${VAR_COUNT_FAIL} mailbox(es)" 15158332 "Backup failed for the following mailboxes:\n\n${FAILED_USERS[*]}"
+	# If errors occurred on user backups, exit with return code 1.
+	exit 1
 fi
